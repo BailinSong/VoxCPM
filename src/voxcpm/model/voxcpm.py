@@ -546,7 +546,11 @@ class VoxCPMModel(nn.Module):
         residual_hidden = residual_enc_outputs[:, -1, :]
 
 
-        for i in tqdm(range(max_len)):
+        # 创建动态进度条，初始设置为最大长度
+        pbar = tqdm(total=max_len, desc="Generating audio", unit="step", 
+                   bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+        
+        for i in range(max_len):
             dit_hidden_1 = self.lm_to_dit_proj(lm_hidden)  # [b, h_dit]
             dit_hidden_2 = self.res_to_dit_proj(residual_hidden)  # [b, h_dit]
             dit_hidden = dit_hidden_1 + dit_hidden_2  # [b, h_dit]
@@ -568,7 +572,27 @@ class VoxCPMModel(nn.Module):
             prefix_feat_cond = pred_feat
             
             stop_flag = self.stop_head(self.stop_actn(self.stop_proj(lm_hidden))).argmax(dim=-1)[0].cpu().item()
+            
+            # 更新进度条显示
+            pbar.update(1)
+            pbar.set_postfix({
+                'current_step': i + 1,
+                'stop_flag': stop_flag,
+                'min_len': min_len,
+                'status': 'checking_stop' if i > min_len else 'generating'
+            })
+            
             if i > min_len and stop_flag == 1:
+                # 提前停止时，调整进度条总长度以显示100%完成
+                actual_steps = i + 1
+                pbar.total = actual_steps
+                pbar.n = actual_steps  # 设置当前进度为总步数
+                pbar.refresh()
+                pbar.set_description("✅ Generation completed (early stop)")
+                pbar.set_postfix({
+                    'total_steps': actual_steps,
+                    'status': 'completed'
+                })
                 break
     
             lm_hidden = self.base_lm.forward_step(
@@ -580,6 +604,9 @@ class VoxCPMModel(nn.Module):
             residual_hidden = self.residual_lm.forward_step(
                 lm_hidden + curr_embed[:, 0, :], torch.tensor([self.residual_lm.kv_cache.step()], device=curr_embed.device)
             ).clone()
+        
+        # 关闭进度条
+        pbar.close()
                 
         pred_feat_seq = torch.cat(pred_feat_seq, dim=1)  # b, t, p, d
 

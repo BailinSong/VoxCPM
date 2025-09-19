@@ -154,6 +154,12 @@ class MiniCPMAttention(nn.Module):
 
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
+        # 处理 Grouped Query Attention (GQA)
+        # 当 num_heads != num_key_value_heads 时，需要重复 key 和 value 张量
+        if self.num_heads != self.num_key_value_heads:
+            key_states = key_states.repeat_interleave(self.num_heads // self.num_key_value_heads, dim=1)
+            value_states = value_states.repeat_interleave(self.num_heads // self.num_key_value_heads, dim=1)
+
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             query_states,
             key_states,
@@ -192,15 +198,31 @@ class MiniCPMAttention(nn.Module):
 
         key_cache, value_cache = kv_cache
 
-        key_cache[:, :, position_id, :] = key_states
-        value_cache[:, :, position_id, :] = value_states
+        # 处理 Grouped Query Attention (GQA)
+        # 当 num_heads != num_key_value_heads 时，需要重复 key 和 value 张量以匹配缓存大小
+        if self.num_heads != self.num_key_value_heads:
+            # 扩展 key_states 和 value_states 以匹配缓存的头数
+            key_states_expanded = key_states.repeat_interleave(self.num_heads // self.num_key_value_heads, dim=1)
+            value_states_expanded = value_states.repeat_interleave(self.num_heads // self.num_key_value_heads, dim=1)
+            
+            key_cache[:, :, position_id, :] = key_states_expanded
+            value_cache[:, :, position_id, :] = value_states_expanded
+            
+            key_cache_expanded = key_cache
+            value_cache_expanded = value_cache
+        else:
+            key_cache[:, :, position_id, :] = key_states
+            value_cache[:, :, position_id, :] = value_states
+            
+            key_cache_expanded = key_cache
+            value_cache_expanded = value_cache
 
-        attn_mask = torch.arange(key_cache.size(2), device=key_cache.device) <= position_id
+        attn_mask = torch.arange(key_cache_expanded.size(2), device=key_cache_expanded.device) <= position_id
 
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             query_states,
-            key_cache,
-            value_cache,
+            key_cache_expanded,
+            value_cache_expanded,
             attn_mask=attn_mask,
         )
 
@@ -400,7 +422,7 @@ class MiniCPMModel(nn.Module):
     def setup_cache(self, batch_size: int, max_length: int, device, dtype: torch.dtype):
         self.kv_cache = StaticKVCache(
             num_layers=self.config.num_hidden_layers,
-            num_kv_heads=self.config.num_key_value_heads,
+            num_kv_heads=self.config.num_attention_heads,  # 使用 num_attention_heads 而不是 num_key_value_heads
             dim_kv_head=self.config.hidden_size // self.config.num_attention_heads if self.config.kv_channels is None else self.config.kv_channels,
             batch_size=batch_size,
             device=device,
