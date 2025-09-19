@@ -1,5 +1,10 @@
 # VoxCPM 项目依赖包列表
 # 核心深度学习框架
+# 注意：PyTorch 2.1.0+ 支持多种后端加速：
+# - CUDA (NVIDIA GPU)
+# - DirectML (Windows 通用 GPU)
+# - HIP (AMD GPU)
+# - MPS (Apple Silicon)
 torch>=2.1.0
 torchaudio>=2.1.0
 

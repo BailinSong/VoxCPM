@@ -83,8 +83,16 @@ class VoxCPMModel(nn.Module):
         self.feat_dim = config.feat_dim
         self.patch_size = config.patch_size
         self.device = config.device
+        # 设备检测逻辑：优先使用 CUDA，其次 DirectML，再次 HIP，然后 MPS，最后 CPU
         if not torch.cuda.is_available():
-            self.device = "cpu"
+            if self._is_directml_available():
+                self.device = "directml"
+            elif self._is_hip_available():
+                self.device = "hip"
+            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                self.device = "mps"
+            else:
+                self.device = "cpu"
 
         # Text-Semantic LM
         self.base_lm = MiniCPMModel(config.lm_config)
@@ -146,11 +154,57 @@ class VoxCPMModel(nn.Module):
         self.chunk_size = audio_vae.chunk_size
         self.sample_rate = audio_vae.sample_rate
 
+    def _is_directml_available(self) -> bool:
+        """检查 DirectML 设备是否可用"""
+        try:
+            # 检查是否在 Windows 上
+            import platform
+            if platform.system() != "Windows":
+                return False
+            
+            # 检查是否有 DirectML 后端支持
+            if hasattr(torch.backends, 'directml') and torch.backends.directml.is_available():
+                return True
+            
+            # 尝试创建 DirectML 张量
+            try:
+                torch.tensor([1.0], device='directml:0')
+                return True
+            except:
+                return False
+        except:
+            return False
+
+    def _is_hip_available(self) -> bool:
+        """检查 HIP 设备是否可用"""
+        try:
+            # 检查是否有 HIP 后端支持
+            if hasattr(torch.version, 'hip') and torch.version.hip is not None:
+                return True
+            # 检查是否有 AMD GPU 相关的环境变量
+            import os
+            if os.environ.get('ROCM_PATH') is not None:
+                return True
+            # 尝试创建 HIP 张量
+            try:
+                torch.tensor([1.0], device='hip:0')
+                return True
+            except:
+                return False
+        except:
+            return False
     
     def optimize(self):
         try:
-            if self.device != "cuda":
-                raise ValueError("VoxCPMModel can only be optimized on CUDA device")
+            if self.device not in ["cuda"]:
+                print(f"Warning: torch.compile optimization is only available on CUDA device, current device: {self.device}")
+                # 对于非 CUDA 设备（DirectML、HIP、MPS、CPU），不进行编译优化
+                self.base_lm.forward_step = self.base_lm.forward_step
+                self.residual_lm.forward_step = self.residual_lm.forward_step
+                self.feat_encoder_step = self.feat_encoder
+                self.feat_decoder.estimator = self.feat_decoder.estimator
+                return self
+                
             try:
                 import triton
             except:
@@ -258,7 +312,11 @@ class VoxCPMModel(nn.Module):
 
         text_token = text_token.unsqueeze(0).to(self.device)
         text_mask = text_mask.unsqueeze(0).to(self.device)
-        audio_feat = audio_feat.unsqueeze(0).to(self.device).to(torch.bfloat16)
+        # 对于 MPS、HIP 和 DirectML 设备，使用 float32 而不是 bfloat16
+        if self.device in ["mps", "hip", "directml"]:
+            audio_feat = audio_feat.unsqueeze(0).to(self.device).to(torch.float32)
+        else:
+            audio_feat = audio_feat.unsqueeze(0).to(self.device).to(torch.bfloat16)
         audio_mask = audio_mask.unsqueeze(0).to(self.device)
 
         target_text_length = len(self.text_tokenizer(target_text))
@@ -444,7 +502,11 @@ class VoxCPMModel(nn.Module):
 
         text_token = text_token.unsqueeze(0).to(self.device)
         text_mask = text_mask.unsqueeze(0).to(self.device)
-        audio_feat = audio_feat.unsqueeze(0).to(self.device).to(torch.bfloat16)
+        # 对于 MPS、HIP 和 DirectML 设备，使用 float32 而不是 bfloat16
+        if self.device in ["mps", "hip", "directml"]:
+            audio_feat = audio_feat.unsqueeze(0).to(self.device).to(torch.float32)
+        else:
+            audio_feat = audio_feat.unsqueeze(0).to(self.device).to(torch.bfloat16)
         audio_mask = audio_mask.unsqueeze(0).to(self.device)
     
         # run inference
@@ -630,6 +692,17 @@ class VoxCPMModel(nn.Module):
         lm_dtype = get_dtype(config.dtype)
         model = model.to(lm_dtype)
         model.audio_vae = model.audio_vae.to(torch.float32)
+        
+        # 对于 MPS、HIP 和 DirectML 设备，确保所有张量都使用兼容的数据类型
+        if model.device == "mps":
+            print("Warning: Converting model to float32 for MPS compatibility")
+            model = model.to(torch.float32)
+        elif model.device == "hip":
+            print("Warning: Converting model to float32 for HIP compatibility")
+            model = model.to(torch.float32)
+        elif model.device == "directml":
+            print("Warning: Converting model to float32 for DirectML compatibility")
+            model = model.to(torch.float32)
 
         model_state_dict = torch.load(
             os.path.join(path, "pytorch_model.bin"),

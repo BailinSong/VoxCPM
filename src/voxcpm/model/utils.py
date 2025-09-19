@@ -105,7 +105,81 @@ def mask_multichar_chinese_tokens(tokenizer: PreTrainedTokenizer):
     return CharTokenizerWrapper(tokenizer)
 
 
+def _is_directml_available():
+    """检查 DirectML 设备是否可用"""
+    try:
+        import torch
+        import platform
+        # 检查是否在 Windows 上
+        if platform.system() != "Windows":
+            return False
+        
+        # 检查是否有 DirectML 后端支持
+        if hasattr(torch.backends, 'directml') and torch.backends.directml.is_available():
+            return True
+        
+        # 尝试创建 DirectML 张量
+        try:
+            torch.tensor([1.0], device='directml:0')
+            return True
+        except:
+            return False
+    except:
+        return False
+
+def _is_hip_available():
+    """检查 HIP 设备是否可用"""
+    try:
+        import torch
+        # 检查是否有 HIP 后端支持
+        if hasattr(torch.version, 'hip') and torch.version.hip is not None:
+            return True
+        # 检查是否有 AMD GPU 相关的环境变量
+        import os
+        if os.environ.get('ROCM_PATH') is not None:
+            return True
+        # 尝试创建 HIP 张量
+        try:
+            torch.tensor([1.0], device='hip:0')
+            return True
+        except:
+            return False
+    except:
+        return False
+
+
 def get_dtype(dtype: str):
+    """
+    获取数据类型，对于不支持的数据类型自动降级
+    """
+    # 检查当前设备
+    device = None
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif _is_directml_available():
+        device = "directml"
+    elif _is_hip_available():
+        device = "hip"
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    
+    # MPS 设备不支持 bfloat16，自动降级为 float32
+    if device == "mps" and dtype in ["bfloat16", "bf16"]:
+        print(f"Warning: MPS device does not support {dtype}, falling back to float32")
+        return torch.float32
+    
+    # DirectML 设备对 bfloat16 支持有限，建议使用 float32
+    if device == "directml" and dtype in ["bfloat16", "bf16"]:
+        print(f"Warning: DirectML device has limited support for {dtype}, falling back to float32")
+        return torch.float32
+    
+    # HIP 设备对 bfloat16 支持有限，建议使用 float32
+    if device == "hip" and dtype in ["bfloat16", "bf16"]:
+        print(f"Warning: HIP device has limited support for {dtype}, falling back to float32")
+        return torch.float32
+    
     if dtype == "bfloat16":
         return torch.bfloat16
     elif dtype == "bf16":

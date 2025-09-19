@@ -15,21 +15,88 @@ import voxcpm
 
 class VoxCPMDemo:
     def __init__(self) -> None:
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # 设备检测逻辑：优先使用 CUDA，其次 DirectML，再次 HIP，然后 MPS，最后 CPU
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        elif self._is_directml_available():
+            self.device = "directml"
+        elif self._is_hip_available():
+            self.device = "hip"
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cpu"
         print(f"🚀 Running on device: {self.device}")
 
         # ASR model for prompt text recognition
         self.asr_model_id = "iic/SenseVoiceSmall"
+        # ASR 模型设备配置：优先使用 GPU，不支持时回退到 CPU
+        if self.device == "cuda":
+            asr_device = "cuda:0"
+        elif self.device == "directml":
+            # DirectML 设备可能不被 ASR 模型支持，回退到 CPU
+            print("Warning: ASR model may not support DirectML, falling back to CPU")
+            asr_device = "cpu"
+        elif self.device == "hip":
+            # HIP 设备可能不被 ASR 模型支持，回退到 CPU
+            print("Warning: ASR model may not support HIP, falling back to CPU")
+            asr_device = "cpu"
+        elif self.device == "mps":
+            print("Warning: ASR model may not support MPS, falling back to CPU")
+            asr_device = "cpu"
+        else:
+            asr_device = "cpu"
+            
         self.asr_model: Optional[AutoModel] = AutoModel(
             model=self.asr_model_id,
             disable_update=True,
             log_level='DEBUG',
-            device="cuda:0" if self.device == "cuda" else "cpu",
+            device=asr_device,
         )
 
         # TTS model (lazy init)
         self.voxcpm_model: Optional[voxcpm.VoxCPM] = None
         self.default_local_model_dir = "./models/VoxCPM-0.5B"
+
+    def _is_directml_available(self) -> bool:
+        """检查 DirectML 设备是否可用"""
+        try:
+            # 检查是否在 Windows 上
+            import platform
+            if platform.system() != "Windows":
+                return False
+            
+            # 检查是否有 DirectML 后端支持
+            if hasattr(torch.backends, 'directml') and torch.backends.directml.is_available():
+                return True
+            
+            # 尝试创建 DirectML 张量
+            try:
+                torch.tensor([1.0], device='directml:0')
+                return True
+            except:
+                return False
+        except:
+            return False
+
+    def _is_hip_available(self) -> bool:
+        """检查 HIP 设备是否可用"""
+        try:
+            # 检查是否有 HIP 后端支持
+            if hasattr(torch.version, 'hip') and torch.version.hip is not None:
+                return True
+            # 检查是否有 AMD GPU 相关的环境变量
+            import os
+            if os.environ.get('ROCM_PATH') is not None:
+                return True
+            # 尝试创建 HIP 张量
+            try:
+                torch.tensor([1.0], device='hip:0')
+                return True
+            except:
+                return False
+        except:
+            return False
 
     # ---------- Model helpers ----------
     def _resolve_model_dir(self) -> str:
