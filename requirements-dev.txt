@@ -1,0 +1,14 @@
+# VoxCPM 项目开发依赖包列表
+# 包含 requirements.txt 中的所有依赖
+-r requirements.txt
+
+# 开发工具
+pytest>=6.0
+pytest-cov>=2.0
+black>=21.0
+flake8>=3.8
+mypy>=0.800
+pre-commit>=2.0
+
+# 可选优化依赖（用于 torch.compile）
+triton  # 仅在 CUDA 环境下需要，用于模型优化

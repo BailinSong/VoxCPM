@@ -1,0 +1,45 @@
+# VoxCPM 项目依赖包列表
+# 核心深度学习框架
+torch>=2.1.0
+torchaudio>=2.1.0
+
+# 自然语言处理
+transformers>=4.36.2
+huggingface-hub
+
+# 音频处理
+soundfile
+funasr
+
+# 文本处理
+wetext
+inflect
+regex
+
+# 数据处理
+numpy
+einops
+addict
+pydantic
+tqdm
+simplejson
+sortedcontainers
+
+# 模型管理
+modelscope>=1.22.0
+datasets>=3,<4
+
+# Web 界面
+gradio
+spaces
+
+# 可选优化依赖（用于 torch.compile）
+# triton  # 仅在 CUDA 环境下需要，用于模型优化
+
+# 开发依赖（可选）
+# pytest>=6.0
+# pytest-cov>=2.0
+# black>=21.0
+# flake8>=3.8
+# mypy>=0.800
+# pre-commit>=2.0

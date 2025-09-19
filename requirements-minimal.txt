@@ -1,0 +1,36 @@
+# VoxCPM 项目最小依赖包列表
+# 仅包含运行 app.py 所必需的核心依赖
+
+# 核心深度学习框架
+torch>=2.1.0
+torchaudio>=2.1.0
+
+# 自然语言处理
+transformers>=4.36.2
+huggingface-hub
+
+# 音频处理
+soundfile
+funasr
+
+# 文本处理
+wetext
+inflect
+regex
+
+# 数据处理
+numpy
+einops
+addict
+pydantic
+tqdm
+simplejson
+sortedcontainers
+
+# 模型管理
+modelscope>=1.22.0
+datasets>=3,<4
+
+# Web 界面
+gradio
+spaces

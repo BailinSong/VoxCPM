@@ -159,7 +159,6 @@ class MiniCPMAttention(nn.Module):
             key_states,
             value_states,
             is_causal=is_causal,
-            enable_gqa=True,
         )
 
         attn_output = attn_output.transpose(1, 2).contiguous()
@@ -203,7 +202,6 @@ class MiniCPMAttention(nn.Module):
             key_cache,
             value_cache,
             attn_mask=attn_mask,
-            enable_gqa=True,
         )
 
         attn_output = attn_output.transpose(1, 2).contiguous()
